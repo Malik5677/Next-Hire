@@ -1,0 +1,19 @@
+{
+  "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mediapipe/camera_utils": "^0.3.1675466862",
+    "@mediapipe/pose": "^0.5.1675469404",
+    "@mui/icons-material": "^7.3.6",
+    "@mui/material": "^7.3.6",
+    "chart.js": "^4.5.1",
+    "framer-motion": "^12.23.25",
+    "react-chartjs-2": "^5.3.1",
+    "react-dropzone": "^14.3.8",
+    "react-google-recaptcha": "^3.1.0",
+    "react-icons": "^5.5.0",
+    "react-webcam": "^7.2.0",
+    "recharts": "^3.5.1",
+    "styled-components": "^6.1.19"
+  }
+}
