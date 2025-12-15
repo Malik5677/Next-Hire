@@ -1,811 +1,440 @@
-/**
- * ============================================================================
- * PROJECT: NEXTHIRE / TALENTRADAR - ENTERPRISE RESUME EDITOR
- * VERSION: 3.0.0 (Ultimate Edition)
- * AUTHOR: AI Assistant
- * DESCRIPTION: A full-featured, Google Docs-style rich text editor optimized 
- *              for building resumes. Includes Dashboard, Dark Mode, 
- *              Page Layout controls, and Export functionality.
- * ============================================================================
- */
+// ============================================================================
+// PROJECT: NEXTHIRE — ULTIMATE RESUME BUILDER (PRO)
+// Features: Glassmorphism, Framer Motion, Smart Layouts, PDF Export
+// ============================================================================
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  // Formatting Icons
-  Bold, Italic, Underline, Strikethrough, Type, Highlighter, 
-  Baseline, PaintRoller, RemoveFormatting,
-  
-  // Alignment & Lists
-  AlignLeft, AlignCenter, AlignRight, AlignJustify, 
-  List, ListOrdered, Indent, Outdent, CheckSquare,
-  
-  // Insert Objects
-  Image as ImageIcon, Link as LinkIcon, Table, Minus, 
-  
-  // System / UI
-  Undo, Redo, Printer, Search, ZoomIn, ZoomOut, 
-  ChevronDown, ChevronRight, X, Check, Plus, 
-  Settings, Layout, FileText, ArrowLeft, 
-  MoreVertical, Sidebar, Download, Share2, 
-  Trash2, Save, Cloud, Clock, Globe, 
-  Maximize, Minimize, GripVertical, File
-} from 'lucide-react';
-import jsPDF from 'jspdf';
+import { motion, AnimatePresence } from 'framer-motion';
 import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
 
-// ============================================================================
-// 1. CONFIGURATION & THEME SYSTEM
-// ============================================================================
+import { 
+  // Editor Icons
+  Bold, Italic, Underline, Strikethrough, Type, Highlighter, 
+  AlignLeft, AlignCenter, AlignRight, AlignJustify, 
+  List, ListOrdered, Indent, Outdent, 
+  Image as ImageIcon, Link as LinkIcon, 
+  Undo, Redo, Printer, Minus, Plus, 
+  // UI Icons
+  ChevronDown, ArrowLeft, Settings, Download, Share2, 
+  Cloud, Globe, FileText, Layout, CheckCircle, 
+  MoreHorizontal, Sparkles, Sidebar as SidebarIcon, X
+} from 'lucide-react';
 
-/**
- * Global Theme Configuration
- * Uses a "Dark UI / Light Paper" approach similar to VS Code or Adobe Suites.
- */
+/* ===========================
+   THEME & CONSTANTS
+=========================== */
 const THEME = {
-  colors: {
-    // Core Backgrounds
-    bg: "#121212",          // Main app background (OLED Black)
-    header: "#1E1E1E",      // Header bar background
-    toolbar: "#252526",     // Toolbar background
-    sidebar: "#1E1E1E",     // Settings sidebar
-    ruler: "#1E1E1E",       // Ruler background
-    
-    // Borders & Dividers
-    border: "#333333",      
-    divider: "#444444",     
-
-    // Typography
-    text: "#E0E0E0",        // Main UI text
-    textDim: "#A0A0A0",     // Secondary labels
-    textPaper: "#111111",   // Text color ON the resume paper
-    
-    // Interactive Elements
-    accent: "#4B9CFF",      // Primary Brand Color (Blue)
-    accentHover: "rgba(75, 156, 255, 0.2)", 
-    accentActive: "#0056b3",
-    
-    // Feedback Colors
-    success: "#4CAF50",
-    warning: "#FFC107",
-    danger: "#FF6B6B",
-    
-    // Components
-    paper: "#FFFFFF",
-    inputBg: "#2A2A2A",
-    hover: "rgba(255, 255, 255, 0.08)"
-  },
-  spacing: {
-    headerHeight: "60px",
-    toolbarHeight: "46px",
-    rulerHeight: "24px",
-    footerHeight: "28px",
-    sidebarWidth: "300px"
-  },
-  shadows: {
-    card: "0 4px 6px rgba(0, 0, 0, 0.3)",
-    paper: "0 0 50px rgba(0, 0, 0, 0.5)", // Deep shadow for the page
-    dropdown: "0 4px 12px rgba(0,0,0,0.5)"
-  },
-  fonts: {
-    ui: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-    editor: "Arial, sans-serif"
-  }
+  bg: "#09090b",       // Deep Zinc Black
+  sidebar: "#18181b",  // Zinc 900
+  paper: "#ffffff",
+  accent: "#3b82f6",   // Bright Blue
+  accentGlow: "0 0 20px rgba(59, 130, 246, 0.5)",
+  text: "#f4f4f5",
+  textDim: "#a1a1aa",
+  border: "rgba(255, 255, 255, 0.1)",
+  glass: "rgba(24, 24, 27, 0.7)", // Backdrop blur effect
+  fontUI: "'Inter', sans-serif",
 };
 
-// Available Fonts for the Editor
-const FONTS = [
-  "Arial", "Helvetica", "Times New Roman", "Courier New", 
-  "Georgia", "Verdana", "Trebuchet MS", "Roboto", "Open Sans", "Calibri"
-];
-
-// Zoom Presets
-const ZOOM_LEVELS = [50, 75, 90, 100, 110, 125, 150, 175, 200];
-
-// Paper Dimensions
 const PAGE_SIZES = {
-  a4: { width: "210mm", height: "297mm", label: "A4 (210 x 297 mm)" },
-  letter: { width: "215.9mm", height: "279.4mm", label: "Letter (8.5 x 11 in)" },
-  legal: { width: "215.9mm", height: "355.6mm", label: "Legal (8.5 x 14 in)" }
+  a4: { width: "210mm", height: "297mm", label: "A4 (International)" },
+  letter: { width: "8.5in", height: "11in", label: "US Letter" }
 };
 
-// Text Style Blocks
-const TEXT_STYLES = [
-  { label: "Normal text", value: "P", fontSize: "11pt", fontWeight: "400" },
-  { label: "Title", value: "H1", fontSize: "26pt", fontWeight: "700" },
-  { label: "Subtitle", value: "H2", fontSize: "18pt", fontWeight: "400" },
-  { label: "Heading 1", value: "H3", fontSize: "14pt", fontWeight: "700" },
-  { label: "Heading 2", value: "H4", fontSize: "12pt", fontWeight: "700" },
-  { label: "Heading 3", value: "H5", fontSize: "11pt", fontWeight: "700" },
-];
+const FONTS = ["Arial", "Georgia", "Times New Roman", "Courier New", "Verdana", "Roboto", "Open Sans"];
 
-// ============================================================================
-// 2. UTILITIES & HELPERS
-// ============================================================================
-// ============================================================================
-// 2. TEMPLATE DATA (This was missing!)
-// ============================================================================
+/* ===========================
+   ANIMATION VARIANTS
+=========================== */
+const fadeIn = {
+  hidden: { opacity: 0, y: 20 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.4 } },
+  exit: { opacity: 0, y: -20 }
+};
 
+const cardHover = {
+  hover: { y: -8, boxShadow: "0 15px 30px rgba(0,0,0,0.4)", scale: 1.02 }
+};
+
+/* ===========================
+   TEMPLATES DATA
+=========================== */
 const TEMPLATES = [
-  { 
-    id: "blank", 
-    name: "Blank Document", 
-    category: "Basic",
-    description: "Start from a completely clean slate.", 
-    previewColor: "#1E1E1E" 
-  },
-  { 
-    id: "swiss", 
-    name: "Swiss Modern", 
-    category: "Resume",
-    description: "Clean, sans-serif design with bold headers.", 
-    previewColor: "#f8f9fa" 
-  },
-  { 
-    id: "executive", 
-    name: "Executive Serif", 
-    category: "Resume",
-    description: "Traditional professional layout for senior roles.", 
-    previewColor: "#fff" 
-  },
-  { 
-    id: "developer", 
-    name: "Tech Developer", 
-    category: "Resume",
-    description: "Monospace accents optimized for technical skills.", 
-    previewColor: "#f0f4ff" 
-  },
-  { 
-    id: "creative", 
-    name: "Creative Studio", 
-    category: "Portfolio",
-    description: "Modern layout for designers and artists.", 
-    previewColor: "#fff0f0" 
-  }
+  { id: "blank", name: "Blank Canvas", desc: "Start from scratch.", color: "#27272a" },
+  { id: "swiss", name: "Swiss Modern", desc: "Clean, bold typography.", color: "#e0e7ff" },
+  { id: "executive", name: "Executive", desc: "Traditional & serif.", color: "#fef3c7" },
+  { id: "tech", name: "Tech Lead", desc: "Monospace accents.", color: "#d1fae5" },
 ];
 
-/**
- * Generates the HTML content for specific templates
- */
-const generateTemplateHTML = (id) => {
-  const commonContact = `
-    <div style="text-align: center; margin-bottom: 24px; color: #555; font-size: 10pt; line-height: 1.5;">
-      <span>email@example.com</span> • <span>(555) 123-4567</span> • <span>New York, NY</span>
-      <br/>
-      <a href="#" style="color: #0066cc; text-decoration: none;">linkedin.com/in/johndoe</a> • <a href="#" style="color: #0066cc; text-decoration: none;">github.com/johndoe</a>
-    </div>
-  `;
-
-  const commonExp = `
-    <h3 style="border-bottom: 1px solid #ccc; padding-bottom: 6px; text-transform: uppercase; font-size: 12pt; margin-top: 24px; letter-spacing: 1px; color: #333;">Experience</h3>
-    
-    <div style="margin-top: 16px;">
-      <div style="display: flex; justify-content: space-between; align-items: baseline;">
-        <span style="font-weight: bold; font-size: 11pt;">Senior Software Engineer</span>
-        <span style="font-size: 10pt; font-weight: bold;">2021 - Present</span>
-      </div>
-      <div style="color: #555; font-style: italic; margin-bottom: 8px; font-size: 10pt;">Tech Solutions Inc. | San Francisco, CA</div>
-      <ul style="margin: 0; padding-left: 18px; font-size: 10.5pt; line-height: 1.5;">
-        <li>Spearheaded the migration of legacy code to React, improving load times by 40%.</li>
-        <li>Mentored 4 junior developers and conducted weekly code reviews.</li>
-        <li>Implemented CI/CD pipelines using GitHub Actions and Docker.</li>
-      </ul>
-    </div>
-
-    <div style="margin-top: 16px;">
-      <div style="display: flex; justify-content: space-between; align-items: baseline;">
-        <span style="font-weight: bold; font-size: 11pt;">Frontend Developer</span>
-        <span style="font-size: 10pt; font-weight: bold;">2018 - 2021</span>
-      </div>
-      <div style="color: #555; font-style: italic; margin-bottom: 8px; font-size: 10pt;">Creative Agency LLC | Austin, TX</div>
-      <ul style="margin: 0; padding-left: 18px; font-size: 10.5pt; line-height: 1.5;">
-        <li>Developed responsive websites for over 20 Fortune 500 clients.</li>
-        <li>Collaborated with UI/UX designers to implement pixel-perfect interfaces.</li>
-      </ul>
-    </div>
-  `;
-
-  const commonSkills = `
-    <h3 style="border-bottom: 1px solid #ccc; padding-bottom: 6px; text-transform: uppercase; font-size: 12pt; margin-top: 24px; letter-spacing: 1px; color: #333;">Skills</h3>
-    <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; font-size: 10pt;">
-      <span><strong>Languages:</strong> JavaScript (ES6+), TypeScript, Python, SQL</span><br/>
-      <span><strong>Frameworks:</strong> React, Next.js, Node.js, Express, Django</span><br/>
-      <span><strong>Tools:</strong> Git, Docker, AWS, Figma, Jira</span>
-    </div>
-  `;
-
+// Helper to generate initial HTML based on template
+const getTemplateHTML = (id) => {
+  const dummyText = `<p>Start typing your professional story...</p>`;
+  const header = (title, font) => `<h1 style="font-family: ${font}; font-size: 28pt; border-bottom: 2px solid #333; padding-bottom: 10px;">YOUR NAME</h1>`;
+  
   switch(id) {
-    case 'swiss':
-      return `
-        <div style="font-family: Arial, sans-serif; color: #222;">
-          <h1 style="font-weight: 900; font-size: 36pt; text-transform: uppercase; letter-spacing: -1px; margin-bottom: 8px; line-height: 1;">John Doe</h1>
-          <div style="font-size: 14pt; color: #666; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 20px;">Full Stack Developer</div>
-          ${commonContact}
-          ${commonExp}
-          ${commonSkills}
-        </div>`;
-    case 'executive':
-      return `
-        <div style="font-family: Georgia, serif; color: #111;">
-          <h1 style="font-weight: bold; font-size: 32pt; text-align: center; margin-bottom: 8px;">John Doe</h1>
-          <hr style="border: 0; border-top: 2px solid #111; margin: 16px 0;" />
-          ${commonContact}
-          ${commonExp}
-          ${commonSkills}
-        </div>`;
-    case 'developer':
-      return `
-        <div style="font-family: 'Courier New', monospace; color: #222;">
-          <h1 style="font-weight: bold; font-size: 28pt; color: #0056b3; margin-bottom: 8px;">&lt;John_Doe /&gt;</h1>
-          <p style="color: #666; font-size: 12pt;">// Senior Full Stack Developer</p>
-          <hr style="border: 0; border-top: 1px dashed #999; margin: 20px 0;" />
-          ${commonContact}
-          ${commonExp}
-          ${commonSkills}
-        </div>`;
-    default: // Blank
-      return `<h1 style="font-size: 24pt;">Untitled Document</h1><p>Start typing here...</p>`;
+    case 'swiss': return `<div style="font-family: Arial;">${header('YOUR NAME', 'Arial')}<p><strong>SENIOR DEVELOPER</strong></p>${dummyText}</div>`;
+    case 'executive': return `<div style="font-family: Georgia;">${header('YOUR NAME', 'Georgia')}<p><i>Executive Director</i></p>${dummyText}</div>`;
+    case 'tech': return `<div style="font-family: 'Courier New';">${header('<YOUR_NAME />', 'Courier New')}<p>// Full Stack Engineer</p>${dummyText}</div>`;
+    default: return `<div style="font-family: Arial;">${header('Your Name', 'Arial')}${dummyText}</div>`;
   }
 };
 
-// ============================================================================
-// 3. REUSABLE UI COMPONENTS
-// ============================================================================
+/* ===========================
+   COMPONENTS
+=========================== */
 
-const ToolbarButton = ({ icon, label, active, onClick, disabled }) => (
-  <button
+// 1. Toolbar Button (Animated)
+const ToolBtn = ({ icon, active, onClick, title }) => (
+  <motion.button
+    whileHover={{ scale: 1.1, backgroundColor: "rgba(255,255,255,0.1)" }}
+    whileTap={{ scale: 0.95 }}
     onClick={onClick}
-    disabled={disabled}
-    title={label}
+    title={title}
     style={{
-      minWidth: "32px",
-      height: "32px",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      borderRadius: "4px",
+      padding: "8px",
+      borderRadius: "8px",
       border: "none",
-      background: active ? THEME.colors.accentHover : "transparent",
-      // IMPORTANT: Icons are forced WHITE for visibility in Dark Mode
-      color: "#FFFFFF", 
-      cursor: disabled ? "not-allowed" : "pointer",
-      padding: "0 6px",
-      opacity: disabled ? 0.3 : 1,
-      transition: "background 0.1s ease-in-out",
-      margin: "0 1px"
+      background: active ? "rgba(59, 130, 246, 0.2)" : "transparent",
+      color: active ? THEME.accent : THEME.textDim,
+      cursor: "pointer",
+      display: "flex", alignItems: "center", justifyContent: "center"
     }}
-    onMouseEnter={(e) => !active && !disabled && (e.currentTarget.style.background = THEME.colors.hover)}
-    onMouseLeave={(e) => !active && !disabled && (e.currentTarget.style.background = "transparent")}
   >
     {icon}
-  </button>
+  </motion.button>
 );
 
-const Separator = () => (
-  <div style={{ width: "1px", height: "20px", background: THEME.colors.divider, margin: "0 6px" }} />
-);
+// 2. Divider
+const Divider = () => <div style={{ width: 1, height: 24, background: THEME.border, margin: "0 8px" }} />;
 
-const SidebarSection = ({ title, children, isOpen, onToggle }) => (
-  <div style={{ borderBottom: `1px solid ${THEME.colors.border}` }}>
-    <button 
-      onClick={onToggle}
-      style={{ 
-        width: "100%", 
-        padding: "12px 16px", 
-        display: "flex", 
-        alignItems: "center", 
-        justifyContent: "space-between",
-        background: "transparent", 
-        border: "none", 
-        color: THEME.colors.text, 
-        fontWeight: 600, 
-        fontSize: "12px", 
-        textTransform: "uppercase", 
-        cursor: "pointer" 
-      }}
-    >
-      {title}
-      <ChevronDown size={14} style={{ transform: isOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }} />
-    </button>
-    {isOpen && <div style={{ padding: "0 16px 16px 16px", animation: "fadeIn 0.2s" }}>{children}</div>}
-  </div>
-);
-
-const InputGroup = ({ label, children }) => (
-  <div style={{ marginBottom: "14px" }}>
-    <label style={{ display: "block", fontSize: "11px", color: THEME.colors.textDim, marginBottom: "6px", fontWeight: 500 }}>{label}</label>
-    {children}
-  </div>
-);
-
-// ============================================================================
-// 4. CUSTOM HOOKS
-// ============================================================================
-
-const useHistory = (initialState) => {
-  const [history, setHistory] = useState([initialState]);
-  const [index, setIndex] = useState(0);
-
-  const push = (state) => {
-    const newHistory = history.slice(0, index + 1);
-    newHistory.push(state);
-    // Limit history stack to 50 steps to save memory
-    if (newHistory.length > 50) newHistory.shift();
-    setHistory(newHistory);
-    setIndex(newHistory.length - 1);
-  };
-
-  const undo = () => {
-    if (index > 0) setIndex(index - 1);
-  };
-
-  const redo = () => {
-    if (index < history.length - 1) setIndex(index + 1);
-  };
-
-  return { 
-    state: history[index], 
-    push, 
-    undo, 
-    redo, 
-    canUndo: index > 0, 
-    canRedo: index < history.length - 1 
-  };
-};
-
-// ============================================================================
-// 5. MAIN EDITOR COMPONENT
-// ============================================================================
-
-export default function UltimateResumeEditor() {
+// ===========================
+// MAIN COMPONENT
+// ===========================
+export default function ResumeBuilder() {
   const navigate = useNavigate();
   const editorRef = useRef(null);
 
-  // --- APP STATE ---
-  const [view, setView] = useState("dashboard"); // 'dashboard' or 'editor'
+  // --- STATE ---
+  const [view, setView] = useState("dashboard"); // dashboard | editor
   const [docTitle, setDocTitle] = useState("Untitled Resume");
-  const [lastSaved, setLastSaved] = useState("Unsaved");
-  const [showSidebar, setShowSidebar] = useState(true);
-  const [showRuler, setShowRuler] = useState(true);
-  
-  // Sidebar Collapsible Sections
-  const [sidebarSections, setSidebarSections] = useState({ 
-    layout: true, 
-    type: true, 
-    stats: true,
-    export: false 
-  });
-
-  // --- EDITOR CONTENT STATE ---
-  const { state: content, push: pushHistory, undo, redo, canUndo, canRedo } = useHistory("");
-  const [wordCount, setWordCount] = useState(0);
-  const [charCount, setCharCount] = useState(0);
-
-  // --- FORMATTING STATE ---
-  const [activeFormats, setActiveFormats] = useState({});
-  const [currentFont, setCurrentFont] = useState("Arial");
-  const [currentSize, setCurrentSize] = useState(11);
-  const [currentStyle, setCurrentStyle] = useState("P");
-
-  // --- PAGE LAYOUT STATE ---
+  const [lastSaved, setLastSaved] = useState("Just now");
   const [zoom, setZoom] = useState(100);
-  const [pageSize, setPageSize] = useState("a4");
-  const [margins, setMargins] = useState({ top: 25, bottom: 25, left: 25, right: 25 });
+  const [showSidebar, setShowSidebar] = useState(true);
+  const [isExporting, setIsExporting] = useState(false);
+  
+  // Editor State
+  const [activeFormats, setActiveFormats] = useState({});
+  const [stats, setStats] = useState({ words: 0, chars: 0 });
 
-  // --- LIFECYCLE: Document Stats Updater ---
-  useEffect(() => {
-    if (editorRef.current) {
-      const text = editorRef.current.innerText || "";
-      setWordCount(text.trim() === "" ? 0 : text.trim().split(/\s+/).length);
-      setCharCount(text.length);
-      setLastSaved("Just now"); // Simulate autosave
-    }
-  }, [content]);
+  // --- FORMATTING LOGIC ---
+  const execCmd = (cmd, val = null) => {
+    document.execCommand(cmd, false, val);
+    checkFormats();
+    editorRef.current.focus();
+  };
 
-  // --- LIFECYCLE: Keyboard Shortcuts ---
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      // Undo/Redo
-      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
-        e.preventDefault();
-        if (e.shiftKey) redo();
-        else undo();
-      }
-      // Print
-      if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
-        e.preventDefault();
-        window.print();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [undo, redo]);
-
-  // --- ACTIONS ---
-
-  const checkFormatState = () => {
-    if (!editorRef.current) return;
-    
-    // Check boolean states
+  const checkFormats = () => {
     setActiveFormats({
       bold: document.queryCommandState("bold"),
       italic: document.queryCommandState("italic"),
       underline: document.queryCommandState("underline"),
-      strike: document.queryCommandState("strikethrough"),
+      ul: document.queryCommandState("insertUnorderedList"),
+      ol: document.queryCommandState("insertOrderedList"),
       alignLeft: document.queryCommandState("justifyLeft"),
       alignCenter: document.queryCommandState("justifyCenter"),
       alignRight: document.queryCommandState("justifyRight"),
-      alignJustify: document.queryCommandState("justifyFull"),
-      list: document.queryCommandState("insertUnorderedList"),
-      listOrdered: document.queryCommandState("insertOrderedList")
     });
-    
-    // Check value states
-    const f = document.queryCommandValue("fontName");
-    if (f) setCurrentFont(f.replace(/['"]+/g, ''));
+    updateStats();
   };
 
-  const execCmd = (command, value = null) => {
-    document.execCommand(command, false, value);
-    editorRef.current?.focus();
-    checkFormatState();
-    // Push new state to history
-    if (editorRef.current) {
-      pushHistory(editorRef.current.innerHTML);
-    }
+  const updateStats = () => {
+    if(!editorRef.current) return;
+    const text = editorRef.current.innerText || "";
+    setStats({
+      words: text.trim() ? text.trim().split(/\s+/).length : 0,
+      chars: text.length
+    });
+    setLastSaved("Saving...");
+    setTimeout(() => setLastSaved("Saved"), 800);
   };
 
-  const handleLoadTemplate = (t) => {
-    const html = generateTemplateHTML(t.id);
-    
-    // Reset state
-    setDocTitle(t.id === 'blank' ? "Untitled Document" : `${t.name} Draft`);
+  const loadTemplate = (tpl) => {
+    setDocTitle(tpl.name);
     setView("editor");
-    
-    // Defer insertion to ensure DOM is ready
     setTimeout(() => {
-      if (editorRef.current) {
-        editorRef.current.innerHTML = html;
-        pushHistory(html); // Initial state
-        checkFormatState();
-      }
+      if(editorRef.current) editorRef.current.innerHTML = getTemplateHTML(tpl.id);
     }, 100);
   };
 
-  const toggleSidebarSection = (sec) => {
-    setSidebarSections(prev => ({ ...prev, [sec]: !prev[sec] }));
+  const handleExportPDF = async () => {
+    setIsExporting(true);
+    const element = editorRef.current;
+    const canvas = await html2canvas(element, { scale: 2 });
+    const imgData = canvas.toDataURL('image/png');
+    const pdf = new jsPDF('p', 'mm', 'a4');
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+    
+    pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+    pdf.save(`${docTitle}.pdf`);
+    setIsExporting(false);
   };
 
-  // --- RENDERERS ---
-
-  // 1. DASHBOARD RENDERER
+  /* ===========================
+     VIEW: DASHBOARD
+  =========================== */
   const renderDashboard = () => (
-    <div style={{ minHeight: "100vh", background: THEME.colors.bg, color: THEME.colors.text, fontFamily: THEME.fonts.ui }}>
+    <div style={{ minHeight: "100vh", background: THEME.bg, color: THEME.text, fontFamily: THEME.fontUI, padding: "40px" }}>
       
-      {/* Navbar */}
-      <header style={{ height: THEME.spacing.headerHeight, background: THEME.colors.header, borderBottom: `1px solid ${THEME.colors.border}`, display: "flex", alignItems: "center", padding: "0 40px" }}>
-        <div style={{ width: 40, height: 40, background: "linear-gradient(135deg, #4B9CFF, #0056b3)", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "center", marginRight: "16px", boxShadow: "0 2px 10px rgba(75, 156, 255, 0.3)" }}>
-          <FileText color="#fff" size={24} />
-        </div>
-        <h1 style={{ fontSize: "20px", fontWeight: 600, letterSpacing: "-0.5px" }}>Resume Builder <span style={{ opacity: 0.5, fontWeight: 400 }}>Workspace</span></h1>
-      </header>
-      
-      {/* Content */}
-      <main style={{ padding: "40px", maxWidth: "1200px", margin: "0 auto" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "32px" }}>
-          <h2 style={{ fontSize: "24px", fontWeight: 600 }}>Start New Document</h2>
-          <div style={{ display: "flex", gap: "12px" }}>
-            <button style={{ background: "transparent", border: `1px solid ${THEME.colors.border}`, color: THEME.colors.textDim, padding: "8px 16px", borderRadius: "6px", cursor: "pointer" }}>Recent Files</button>
+      {/* Header */}
+      <motion.div 
+        initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
+        style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 60 }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 15 }}>
+          <div style={{ width: 45, height: 45, borderRadius: 12, background: `linear-gradient(135deg, ${THEME.accent}, #8b5cf6)`, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: THEME.accentGlow }}>
+            <FileText color="white" size={24} />
+          </div>
+          <div>
+            <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Resume Builder</h1>
+            <p style={{ margin: 0, color: THEME.textDim, fontSize: 14 }}>Workspace / My Documents</p>
           </div>
         </div>
-        
-        {/* Template Grid */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "28px" }}>
-          
-          {/* Blank Card */}
-          <div onClick={() => handleLoadTemplate({ id: 'blank', name: 'Blank' })} style={{ cursor: "pointer", transition: "transform 0.2s" }}
-               onMouseEnter={(e) => e.currentTarget.style.transform = "translateY(-4px)"}
-               onMouseLeave={(e) => e.currentTarget.style.transform = "translateY(0)"}>
-            <div style={{ height: "320px", background: "#1E1E1E", border: `1px solid ${THEME.colors.border}`, borderRadius: "8px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", marginBottom: "12px" }}>
-              <div style={{ width: 60, height: 60, borderRadius: "50%", background: "#333", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: "16px" }}>
-                <Plus size={32} color="#fff" />
-              </div>
-              <span style={{ fontWeight: 500, color: "#fff" }}>Blank Document</span>
-            </div>
-          </div>
+        <button onClick={() => navigate("/dashboard")} style={{ background: "rgba(255,255,255,0.05)", border: `1px solid ${THEME.border}`, padding: "10px 20px", borderRadius: 10, color: "white", cursor: "pointer" }}>Back to Hub</button>
+      </motion.div>
 
-          {/* Templates */}
-          {TEMPLATES.slice(1).map(t => (
-            <div key={t.id} onClick={() => handleLoadTemplate(t)} style={{ cursor: "pointer", transition: "transform 0.2s" }}
-                 onMouseEnter={(e) => e.currentTarget.style.transform = "translateY(-4px)"}
-                 onMouseLeave={(e) => e.currentTarget.style.transform = "translateY(0)"}>
-               <div style={{ height: "320px", background: t.previewColor, border: `1px solid ${THEME.colors.border}`, borderRadius: "8px", position: "relative", overflow: "hidden", marginBottom: "12px" }}>
-                  {/* CSS Mockup of Resume */}
-                  <div style={{ padding: "24px", opacity: 0.8 }}>
-                    <div style={{ width: "50%", height: "8px", background: "#444", marginBottom: "12px" }}></div>
-                    <div style={{ width: "100%", height: "1px", background: "#ddd", marginBottom: "20px" }}></div>
-                    <div style={{ width: "30%", height: "6px", background: "#888", marginBottom: "8px" }}></div>
-                    <div style={{ width: "90%", height: "4px", background: "#ccc", marginBottom: "6px" }}></div>
-                    <div style={{ width: "85%", height: "4px", background: "#ccc", marginBottom: "6px" }}></div>
-                    <div style={{ width: "80%", height: "4px", background: "#ccc", marginBottom: "24px" }}></div>
-                    <div style={{ width: "30%", height: "6px", background: "#888", marginBottom: "8px" }}></div>
-                    <div style={{ width: "90%", height: "4px", background: "#ccc", marginBottom: "6px" }}></div>
-                  </div>
-                  <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "12px", background: "rgba(0,0,0,0.8)", backdropFilter: "blur(4px)", color: "white" }}>
-                    <div style={{ fontSize: "13px", fontWeight: 600 }}>{t.name}</div>
-                    <div style={{ fontSize: "11px", opacity: 0.7 }}>{t.category}</div>
-                  </div>
-               </div>
+      {/* Hero */}
+      <motion.div 
+        initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.1 }}
+        style={{ textAlign: "center", marginBottom: 60 }}
+      >
+        <h2 style={{ fontSize: 42, fontWeight: 800, marginBottom: 16, background: "linear-gradient(to right, #fff, #94a3b8)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+          Create your next opportunity.
+        </h2>
+        <p style={{ fontSize: 18, color: THEME.textDim }}>Select a professional template to get started.</p>
+      </motion.div>
+
+      {/* Template Grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 30, maxWidth: 1200, margin: "0 auto" }}>
+        {TEMPLATES.map((t, i) => (
+          <motion.div
+            key={t.id}
+            variants={cardHover}
+            whileHover="hover"
+            onClick={() => loadTemplate(t)}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 * i }}
+            style={{ 
+              background: "#18181b", 
+              borderRadius: 20, 
+              border: `1px solid ${THEME.border}`, 
+              overflow: "hidden", 
+              cursor: "pointer",
+              position: "relative"
+            }}
+          >
+            {/* Preview Area */}
+            <div style={{ height: 200, background: t.color, position: "relative", padding: 20 }}>
+              <div style={{ width: "100%", height: "100%", background: "white", borderRadius: 4, boxShadow: "0 10px 20px rgba(0,0,0,0.1)", padding: 15, opacity: 0.9 }}>
+                <div style={{ width: "40%", height: 8, background: "#333", marginBottom: 10 }} />
+                <div style={{ width: "80%", height: 4, background: "#ccc", marginBottom: 5 }} />
+                <div style={{ width: "70%", height: 4, background: "#ccc", marginBottom: 20 }} />
+                <div style={{ width: "30%", height: 6, background: "#666", marginBottom: 8 }} />
+                <div style={{ width: "90%", height: 4, background: "#ddd", marginBottom: 4 }} />
+                <div style={{ width: "90%", height: 4, background: "#ddd", marginBottom: 4 }} />
+              </div>
+              <div style={{ position: "absolute", bottom: 10, right: 10, background: "rgba(0,0,0,0.6)", color: "white", padding: "4px 8px", borderRadius: 4, fontSize: 10, backdropFilter: "blur(4px)" }}>PREVIEW</div>
             </div>
-          ))}
-        </div>
-      </main>
+            {/* Info Area */}
+            <div style={{ padding: 20 }}>
+              <h3 style={{ fontSize: 18, fontWeight: 700, margin: "0 0 5px 0" }}>{t.name}</h3>
+              <p style={{ fontSize: 13, color: THEME.textDim, margin: 0 }}>{t.desc}</p>
+            </div>
+          </motion.div>
+        ))}
+      </div>
     </div>
   );
 
-  // 2. EDITOR RENDERER
+  /* ===========================
+     VIEW: EDITOR
+  =========================== */
   const renderEditor = () => (
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: THEME.colors.bg, color: THEME.colors.text, fontFamily: THEME.fonts.ui }}>
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#0c0c0c", color: THEME.text, fontFamily: THEME.fontUI, overflow: "hidden" }}>
       
-      {/* HEADER AREA */}
-      <header style={{ height: THEME.spacing.headerHeight, background: THEME.colors.header, borderBottom: `1px solid ${THEME.colors.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 20px", flexShrink: 0, zIndex: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-          <button onClick={() => setView("dashboard")} style={{ background: "transparent", border: "none", color: THEME.colors.textDim, cursor: "pointer", padding: "8px", borderRadius: "50%", transition: "background 0.2s" }} onMouseEnter={e => e.currentTarget.style.background = "#333"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+      {/* 1. TOP BAR */}
+      <header style={{ 
+        height: 64, borderBottom: `1px solid ${THEME.border}`, background: "rgba(9, 9, 11, 0.8)", backdropFilter: "blur(12px)", 
+        display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 24px", zIndex: 50 
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <motion.button whileHover={{ scale: 1.1 }} onClick={() => setView("dashboard")} style={{ background: "transparent", border: "none", color: THEME.textDim, cursor: "pointer" }}>
             <ArrowLeft size={20} />
-          </button>
-          <FileText size={26} color={THEME.colors.accent} />
-          <div>
+          </motion.button>
+          <div style={{ display: "flex", flexDirection: "column" }}>
             <input 
               value={docTitle} 
               onChange={(e) => setDocTitle(e.target.value)} 
-              style={{ background: "transparent", border: "none", color: THEME.colors.text, fontSize: "16px", fontWeight: 600, width: "300px", outline: "none" }} 
+              style={{ background: "transparent", border: "none", color: "white", fontSize: 16, fontWeight: 600, outline: "none", width: 200 }} 
             />
-            <div style={{ fontSize: "11px", color: THEME.colors.textDim, display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" }}>
-              <Cloud size={10} /> Saved to cloud
-            </div>
+            <span style={{ fontSize: 11, color: THEME.textDim, display: "flex", alignItems: "center", gap: 4 }}>
+              {lastSaved === "Saved" ? <CheckCircle size={10} color={THEME.accent} /> : <Cloud size={10} />} {lastSaved}
+            </span>
           </div>
         </div>
-        <div style={{ display: "flex", gap: "12px" }}>
-           <button style={{ background: "transparent", border: `1px solid ${THEME.colors.border}`, color: THEME.colors.text, padding: "8px 16px", borderRadius: "6px", fontSize: "13px", fontWeight: 500, cursor: "pointer", display: "flex", alignItems: "center", gap: "8px" }}>
-             <Download size={14} /> Export
-           </button>
-           <button style={{ background: THEME.colors.accent, border: "none", color: "white", padding: "8px 16px", borderRadius: "6px", fontSize: "13px", fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", boxShadow: "0 2px 8px rgba(75, 156, 255, 0.25)" }}>
-             <Share2 size={14} /> Share
-           </button>
+
+        {/* Toolbar (Centered) */}
+        <div style={{ 
+          background: "#1e1e24", borderRadius: 12, padding: "6px 12px", border: `1px solid ${THEME.border}`, 
+          display: "flex", alignItems: "center", gap: 4, boxShadow: "0 4px 12px rgba(0,0,0,0.2)" 
+        }}>
+          <ToolBtn icon={<Undo size={16} />} onClick={() => execCmd("undo")} title="Undo" />
+          <ToolBtn icon={<Redo size={16} />} onClick={() => execCmd("redo")} title="Redo" />
+          <Divider />
+          <ToolBtn icon={<Bold size={16} />} active={activeFormats.bold} onClick={() => execCmd("bold")} title="Bold" />
+          <ToolBtn icon={<Italic size={16} />} active={activeFormats.italic} onClick={() => execCmd("italic")} title="Italic" />
+          <ToolBtn icon={<Underline size={16} />} active={activeFormats.underline} onClick={() => execCmd("underline")} title="Underline" />
+          <Divider />
+          <ToolBtn icon={<AlignLeft size={16} />} active={activeFormats.alignLeft} onClick={() => execCmd("justifyLeft")} />
+          <ToolBtn icon={<AlignCenter size={16} />} active={activeFormats.alignCenter} onClick={() => execCmd("justifyCenter")} />
+          <ToolBtn icon={<List size={16} />} active={activeFormats.ul} onClick={() => execCmd("insertUnorderedList")} />
+          <Divider />
+          <ToolBtn icon={<ImageIcon size={16} />} onClick={() => alert("Image upload feature coming soon!")} title="Insert Image" />
+        </div>
+
+        <div style={{ display: "flex", gap: 10 }}>
+          <motion.button 
+            whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+            onClick={() => setShowSidebar(!showSidebar)}
+            style={{ padding: "8px", borderRadius: 8, border: `1px solid ${THEME.border}`, background: "transparent", color: "white", cursor: "pointer" }}
+          >
+            <SidebarIcon size={18} />
+          </motion.button>
+          <motion.button 
+            whileHover={{ scale: 1.05, boxShadow: "0 0 15px rgba(59, 130, 246, 0.5)" }} 
+            whileTap={{ scale: 0.95 }}
+            onClick={handleExportPDF}
+            disabled={isExporting}
+            style={{ 
+              padding: "8px 16px", borderRadius: 8, background: THEME.accent, color: "white", border: "none", 
+              fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 8 
+            }}
+          >
+            {isExporting ? <span className="loader"></span> : <Download size={16} />} Export
+          </motion.button>
         </div>
       </header>
 
-      {/* MAIN TOOLBAR */}
-      <div style={{ height: THEME.spacing.toolbarHeight, background: THEME.colors.toolbar, borderBottom: `1px solid ${THEME.colors.border}`, display: "flex", alignItems: "center", padding: "0 12px", gap: "2px", overflowX: "auto", flexShrink: 0 }}>
-         
-         {/* History */}
-         <ToolbarButton icon={<Undo size={16} />} onClick={undo} disabled={!canUndo} label="Undo (Ctrl+Z)" />
-         <ToolbarButton icon={<Redo size={16} />} onClick={redo} disabled={!canRedo} label="Redo (Ctrl+Y)" />
-         <ToolbarButton icon={<Printer size={16} />} onClick={() => window.print()} label="Print" />
-         <ToolbarButton icon={<PaintRoller size={16} />} onClick={() => execCmd("removeFormat")} label="Clear Formatting" />
-         
-         <Separator />
-
-         {/* Zoom Control */}
-         <div style={{ display: "flex", alignItems: "center", background: "#1a1a1a", borderRadius: "4px", border: `1px solid ${THEME.colors.border}`, padding: "0 4px", height: "28px", margin: "0 4px" }}>
-            <button onClick={() => setZoom(z => Math.max(25, z-10))} style={{ background: "transparent", border: "none", color: "white", cursor: "pointer", display: "flex", alignItems: "center" }}><Minus size={12} /></button>
-            <span style={{ fontSize: "12px", color: "white", width: "36px", textAlign: "center", userSelect: "none" }}>{zoom}%</span>
-            <button onClick={() => setZoom(z => Math.min(200, z+10))} style={{ background: "transparent", border: "none", color: "white", cursor: "pointer", display: "flex", alignItems: "center" }}><Plus size={12} /></button>
-         </div>
-
-         <Separator />
-
-         {/* Text Style */}
-         <select 
-           value={currentStyle} 
-           onChange={(e) => { setCurrentStyle(e.target.value); execCmd("formatBlock", e.target.value); }}
-           style={{ background: "transparent", color: "white", border: "none", fontSize: "13px", fontWeight: 500, width: "110px", outline: "none", cursor: "pointer", marginLeft: "4px" }}
-         >
-           {TEXT_STYLES.map(s => <option key={s.value} value={s.value} style={{ background: "#333" }}>{s.label}</option>)}
-         </select>
-
-         <Separator />
-
-         {/* Font Family */}
-         <select 
-           value={currentFont} 
-           onChange={(e) => { setCurrentFont(e.target.value); execCmd("fontName", e.target.value); }}
-           style={{ background: "transparent", color: "white", border: "none", fontSize: "13px", width: "100px", outline: "none", cursor: "pointer" }}
-         >
-           {FONTS.map(f => <option key={f} value={f} style={{ background: "#333" }}>{f}</option>)}
-         </select>
-
-         <Separator />
-
-         {/* Font Size */}
-         <ToolbarButton icon={<Minus size={12} />} onClick={() => { setCurrentSize(s => s-1); execCmd("fontSize", "2"); }} />
-         <div style={{ width: "28px", height: "22px", border: `1px solid ${THEME.colors.border}`, borderRadius: "3px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", color: "white", fontWeight: "600" }}>{currentSize}</div>
-         <ToolbarButton icon={<Plus size={12} />} onClick={() => { setCurrentSize(s => s+1); execCmd("fontSize", "4"); }} />
-
-         <Separator />
-
-         {/* Basic Formatting */}
-         <ToolbarButton icon={<Bold size={16} />} active={activeFormats.bold} onClick={() => execCmd("bold")} label="Bold (Ctrl+B)" />
-         <ToolbarButton icon={<Italic size={16} />} active={activeFormats.italic} onClick={() => execCmd("italic")} label="Italic (Ctrl+I)" />
-         <ToolbarButton icon={<Underline size={16} />} active={activeFormats.underline} onClick={() => execCmd("underline")} label="Underline (Ctrl+U)" />
-         <ToolbarButton icon={<Strikethrough size={16} />} active={activeFormats.strike} onClick={() => execCmd("strikeThrough")} label="Strikethrough" />
-         
-         {/* Colors */}
-         <ToolbarButton icon={<Baseline size={16} />} onClick={() => execCmd("foreColor", prompt("Text Color Hex:", "#000000"))} label="Text Color" />
-         <ToolbarButton icon={<Highlighter size={16} />} onClick={() => execCmd("backColor", "#FFFF00")} label="Highlight" />
-
-         <Separator />
-
-         {/* Alignment */}
-         <ToolbarButton icon={<AlignLeft size={16} />} active={activeFormats.alignLeft} onClick={() => execCmd("justifyLeft")} />
-         <ToolbarButton icon={<AlignCenter size={16} />} active={activeFormats.alignCenter} onClick={() => execCmd("justifyCenter")} />
-         <ToolbarButton icon={<AlignRight size={16} />} active={activeFormats.alignRight} onClick={() => execCmd("justifyRight")} />
-         <ToolbarButton icon={<AlignJustify size={16} />} active={activeFormats.alignJustify} onClick={() => execCmd("justifyFull")} />
-
-         <Separator />
-
-         {/* Lists */}
-         <ToolbarButton icon={<List size={16} />} active={activeFormats.list} onClick={() => execCmd("insertUnorderedList")} />
-         <ToolbarButton icon={<ListOrdered size={16} />} active={activeFormats.listOrdered} onClick={() => execCmd("insertOrderedList")} />
-         <ToolbarButton icon={<Indent size={16} />} onClick={() => execCmd("indent")} />
-         <ToolbarButton icon={<Outdent size={16} />} onClick={() => execCmd("outdent")} />
-         
-         <Separator />
-
-         {/* Inserts */}
-         <ToolbarButton icon={<LinkIcon size={16} />} onClick={() => { const url=prompt("Enter URL:"); if(url) execCmd("createLink", url); }} />
-         <ToolbarButton icon={<ImageIcon size={16} />} onClick={() => alert("Drag and drop an image onto the page to insert it.")} />
-
-         <div style={{ flex: 1 }} />
-         
-         {/* Toggle Sidebar */}
-         <button onClick={() => setShowSidebar(!showSidebar)} style={{ background: showSidebar ? THEME.colors.accent : "transparent", border: "none", borderRadius: "4px", color: showSidebar ? "white" : THEME.colors.textDim, cursor: "pointer", padding: "6px" }}>
-            <Sidebar size={18} />
-         </button>
-      </div>
-
-      {/* VISUAL RULER (Optional) */}
-      {showRuler && (
-         <div style={{ height: THEME.spacing.rulerHeight, background: THEME.colors.ruler, borderBottom: `1px solid ${THEME.colors.border}`, display: "flex", justifyContent: "center", position: "relative", flexShrink: 0 }}>
-             <div style={{ width: PAGE_SIZES[pageSize].width, height: "100%", background: "#252526", position: "relative", overflow: "hidden" }}>
-                 {/* Simulated Ticks */}
-                 {[...Array(20)].map((_, i) => (
-                    <div key={i} style={{ position: "absolute", left: `${i * 5}%`, height: "6px", width: "1px", background: "#555", bottom: 0 }}>
-                       <span style={{ position: "absolute", top: "-14px", left: "-4px", fontSize: "9px", color: "#777" }}>{i}</span>
-                    </div>
-                 ))}
-                 {/* Margins Indicators */}
-                 <div style={{ position: "absolute", left: 0, width: `${margins.left}mm`, height: "100%", background: "#181818", opacity: 0.5 }}></div>
-                 <div style={{ position: "absolute", right: 0, width: `${margins.right}mm`, height: "100%", background: "#181818", opacity: 0.5 }}></div>
-             </div>
-         </div>
-      )}
-
-      {/* WORKSPACE AREA */}
+      {/* 2. WORKSPACE */}
       <div style={{ flex: 1, display: "flex", overflow: "hidden", position: "relative" }}>
         
-        {/* Main Editor Canvas */}
-        <div style={{ flex: 1, background: "#0c0c0c", overflowY: "auto", display: "flex", justifyContent: "center", padding: "40px", position: "relative" }}>
-           <div 
-             ref={editorRef}
-             contentEditable
-             suppressContentEditableWarning
-             onKeyUp={checkFormatState}
-             onMouseUp={checkFormatState}
-             onInput={() => {
-               // Autosave trigger could go here
-             }}
-             style={{
-                width: PAGE_SIZES[pageSize].width,
-                minHeight: PAGE_SIZES[pageSize].height,
-                background: "#ffffff",
-                boxShadow: THEME.shadows.paper,
-                paddingTop: `${margins.top}mm`,
-                paddingBottom: `${margins.bottom}mm`,
-                paddingLeft: `${margins.left}mm`,
-                paddingRight: `${margins.right}mm`,
-                color: "#111",
-                outline: "none",
-                fontFamily: currentFont,
-                fontSize: `${currentSize}pt`,
-                lineHeight: "1.5",
-                transform: `scale(${zoom / 100})`,
-                transformOrigin: "top center",
-                transition: "transform 0.15s ease-out",
-                cursor: "text"
-             }}
-           >
-             {/* Content Injected Here via innerHTML */}
-           </div>
+        {/* Editor Canvas */}
+        <div style={{ 
+          flex: 1, overflowY: "auto", display: "flex", justifyContent: "center", padding: "40px 20px",
+          background: `radial-gradient(circle at 50% 50%, #1a1a1a 0%, #09090b 100%)`, cursor: "default"
+        }}>
+          <motion.div 
+            initial={{ scale: 0.9, opacity: 0 }} 
+            animate={{ scale: zoom/100, opacity: 1 }} 
+            transition={{ type: "spring", stiffness: 100 }}
+            style={{ 
+              width: PAGE_SIZES.a4.width, minHeight: PAGE_SIZES.a4.height, 
+              background: "white", boxShadow: "0 20px 50px -12px rgba(0, 0, 0, 0.5)", 
+              padding: "25mm", color: "#111", outline: "none", transformOrigin: "top center"
+            }}
+          >
+            <div 
+              ref={editorRef} 
+              contentEditable 
+              suppressContentEditableWarning
+              onInput={checkFormats}
+              onMouseUp={checkFormats}
+              onKeyUp={checkFormats}
+              style={{ width: "100%", height: "100%", outline: "none" }}
+            >
+              {/* Content Injected Here */}
+            </div>
+          </motion.div>
         </div>
 
-        {/* RIGHT SIDEBAR SETTINGS */}
-        {showSidebar && (
-          <div style={{ width: THEME.spacing.sidebarWidth, background: THEME.colors.sidebar, borderLeft: `1px solid ${THEME.colors.border}`, display: "flex", flexDirection: "column", overflowY: "auto", zIndex: 5 }}>
-             
-             <div style={{ padding: "16px", borderBottom: `1px solid ${THEME.colors.border}`, display: "flex", alignItems: "center", gap: "8px" }}>
-                <Settings size={16} color={THEME.colors.textDim} />
-                <span style={{ fontWeight: 600, fontSize: "13px", textTransform: "uppercase", letterSpacing: "1px", color: THEME.colors.textDim }}>Document Settings</span>
-             </div>
+        {/* 3. SETTINGS SIDEBAR (Animated) */}
+        <AnimatePresence>
+          {showSidebar && (
+            <motion.div 
+              initial={{ x: 300, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 300, opacity: 0 }}
+              style={{ width: 300, background: "#111113", borderLeft: `1px solid ${THEME.border}`, padding: 20, zIndex: 20 }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+                <h3 style={{ fontSize: 14, fontWeight: 700, color: THEME.textDim, textTransform: "uppercase", letterSpacing: 1 }}>Settings</h3>
+                <button onClick={() => setShowSidebar(false)} style={{ background: "transparent", border: "none", color: THEME.textDim, cursor: "pointer" }}><X size={16} /></button>
+              </div>
 
-             {/* Layout Section */}
-             <SidebarSection title="Page Setup" isOpen={sidebarSections.layout} onToggle={() => toggleSidebarSection('layout')}>
-                <InputGroup label="Paper Size">
-                  <select value={pageSize} onChange={(e) => setPageSize(e.target.value)} style={{ width: "100%", background: THEME.colors.inputBg, border: `1px solid ${THEME.colors.border}`, color: "white", padding: "8px", borderRadius: "4px", outline: "none" }}>
-                     {Object.keys(PAGE_SIZES).map(k => <option key={k} value={k}>{PAGE_SIZES[k].label}</option>)}
-                  </select>
-                </InputGroup>
-                
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-                   <InputGroup label="Top (mm)">
-                      <input type="number" value={margins.top} onChange={(e) => setMargins({...margins, top: parseInt(e.target.value)})} style={{ width: "100%", background: THEME.colors.inputBg, border: `1px solid ${THEME.colors.border}`, color: "white", padding: "6px", borderRadius: "4px", outline: "none" }} />
-                   </InputGroup>
-                   <InputGroup label="Bottom (mm)">
-                      <input type="number" value={margins.bottom} onChange={(e) => setMargins({...margins, bottom: parseInt(e.target.value)})} style={{ width: "100%", background: THEME.colors.inputBg, border: `1px solid ${THEME.colors.border}`, color: "white", padding: "6px", borderRadius: "4px", outline: "none" }} />
-                   </InputGroup>
-                   <InputGroup label="Left (mm)">
-                      <input type="number" value={margins.left} onChange={(e) => setMargins({...margins, left: parseInt(e.target.value)})} style={{ width: "100%", background: THEME.colors.inputBg, border: `1px solid ${THEME.colors.border}`, color: "white", padding: "6px", borderRadius: "4px", outline: "none" }} />
-                   </InputGroup>
-                   <InputGroup label="Right (mm)">
-                      <input type="number" value={margins.right} onChange={(e) => setMargins({...margins, right: parseInt(e.target.value)})} style={{ width: "100%", background: THEME.colors.inputBg, border: `1px solid ${THEME.colors.border}`, color: "white", padding: "6px", borderRadius: "4px", outline: "none" }} />
-                   </InputGroup>
+              {/* Layout Controls */}
+              <div style={{ marginBottom: 24 }}>
+                <label style={{ display: "block", fontSize: 12, color: THEME.textDim, marginBottom: 8 }}>Page Zoom</label>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#1e1e24", padding: 8, borderRadius: 8, border: `1px solid ${THEME.border}` }}>
+                  <button onClick={() => setZoom(z => Math.max(50, z-10))} style={{ background: "transparent", border: "none", color: "white", cursor: "pointer" }}><Minus size={14} /></button>
+                  <span style={{ flex: 1, textAlign: "center", fontSize: 13, fontWeight: 600 }}>{zoom}%</span>
+                  <button onClick={() => setZoom(z => Math.min(150, z+10))} style={{ background: "transparent", border: "none", color: "white", cursor: "pointer" }}><Plus size={14} /></button>
                 </div>
-             </SidebarSection>
+              </div>
 
-             {/* Typography Section */}
-             <SidebarSection title="Typography" isOpen={sidebarSections.type} onToggle={() => toggleSidebarSection('type')}>
-                <InputGroup label="Line Spacing">
-                   <select style={{ width: "100%", background: THEME.colors.inputBg, border: `1px solid ${THEME.colors.border}`, color: "white", padding: "8px", borderRadius: "4px", outline: "none" }}>
-                      <option>Single (1.0)</option>
-                      <option>1.15</option>
-                      <option>1.5</option>
-                      <option>Double (2.0)</option>
-                   </select>
-                </InputGroup>
-                <InputGroup label="Character Spacing">
-                   <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      <input type="range" min="-1" max="5" step="0.1" style={{ flex: 1 }} />
-                      <span style={{ fontSize: "11px", color: "#888" }}>0px</span>
-                   </div>
-                </InputGroup>
-             </SidebarSection>
+              {/* Font Settings */}
+              <div style={{ marginBottom: 24 }}>
+                <label style={{ display: "block", fontSize: 12, color: THEME.textDim, marginBottom: 8 }}>Typography</label>
+                <select 
+                  onChange={(e) => execCmd("fontName", e.target.value)}
+                  style={{ width: "100%", background: "#1e1e24", border: `1px solid ${THEME.border}`, color: "white", padding: 10, borderRadius: 8, outline: "none", cursor: "pointer" }}
+                >
+                  {FONTS.map(f => <option key={f} value={f}>{f}</option>)}
+                </select>
+              </div>
 
-             {/* Stats Section */}
-             <SidebarSection title="Statistics" isOpen={sidebarSections.stats} onToggle={() => toggleSidebarSection('stats')}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", marginBottom: "8px", color: "#aaa" }}>
-                   <span>Words</span>
-                   <span style={{ color: "white", fontWeight: "bold" }}>{wordCount}</span>
+              {/* Stats */}
+              <div style={{ padding: 16, background: "rgba(59, 130, 246, 0.1)", borderRadius: 12, border: "1px solid rgba(59, 130, 246, 0.2)" }}>
+                <h4 style={{ fontSize: 13, fontWeight: 700, margin: "0 0 10px 0", color: THEME.accent, display: "flex", alignItems: "center", gap: 6 }}>
+                  <Sparkles size={14} /> Document Stats
+                </h4>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 6 }}>
+                  <span style={{ color: THEME.textDim }}>Words</span>
+                  <span style={{ fontWeight: 600 }}>{stats.words}</span>
                 </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", marginBottom: "8px", color: "#aaa" }}>
-                   <span>Characters</span>
-                   <span style={{ color: "white", fontWeight: "bold" }}>{charCount}</span>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                  <span style={{ color: THEME.textDim }}>Characters</span>
+                  <span style={{ fontWeight: 600 }}>{stats.chars}</span>
                 </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", color: "#aaa" }}>
-                   <span>Reading Time</span>
-                   <span style={{ color: "white" }}>~{Math.ceil(wordCount / 200)} min</span>
-                </div>
-             </SidebarSection>
+              </div>
 
-          </div>
-        )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
-      {/* STATUS FOOTER */}
-      <footer style={{ height: THEME.spacing.footerHeight, background: THEME.colors.header, borderTop: `1px solid ${THEME.colors.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 20px", fontSize: "11px", color: THEME.colors.textDim, flexShrink: 0, zIndex: 10 }}>
-         <div style={{ display: "flex", gap: "20px" }}>
-            <span>Page 1 of 1</span>
-            <span>{wordCount} words</span>
-            <span style={{ display: "flex", alignItems: "center", gap: "6px" }}><Globe size={10} /> English (US)</span>
-         </div>
-         <div style={{ display: "flex", gap: "20px", alignItems: "center" }}>
-            <span style={{ display: "flex", alignItems: "center", gap: "6px" }}><Clock size={10} /> Last saved: {lastSaved}</span>
-            <div style={{ width: "1px", height: "12px", background: "#444" }}></div>
-            <span>Zoom: {zoom}%</span>
-         </div>
-      </footer>
+      {/* Footer */}
+      <div style={{ height: 32, background: "#09090b", borderTop: `1px solid ${THEME.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 20px", fontSize: 11, color: THEME.textDim, zIndex: 50 }}>
+        <div style={{ display: "flex", gap: 16 }}>
+          <span>Page 1 of 1</span>
+          <span>English (US)</span>
+        </div>
+        <div style={{ display: "flex", gap: 16 }}>
+          <span>Autosave: On</span>
+          <span>{Math.ceil(stats.words / 200)} min read time</span>
+        </div>
+      </div>
 
     </div>
   );
 
-  return view === "dashboard" ? renderDashboard() : renderEditor();
+  return (
+    <AnimatePresence mode="wait">
+      {view === "dashboard" ? (
+        <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>{renderDashboard()}</motion.div>
+      ) : (
+        <motion.div key="editor" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>{renderEditor()}</motion.div>
+      )}
+    </AnimatePresence>
+  );
 }
