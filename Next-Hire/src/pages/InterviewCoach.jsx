@@ -1,747 +1,658 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
-import Webcam from 'react-webcam';
-import '../components/InterviewCoach.css';
-import ParticleSphere from '../components/ParticleSphere';
+import React, { useEffect, useRef, useState, useCallback } from "react";
+import Webcam from "react-webcam";
 
-// --- ENHANCED INTERVIEW COACH COMPONENT ---
+// ============================================================================
+// 🔮 ENERGY SPHERE — D2 SHOCKWAVE & PARTICLE HOLOGRAM (INLINE CANVAS)
+// ============================================================================
+function EnergySphere({ state }) {
+  const canvasRef = useRef(null);
 
-const InterviewCoach = () => {
-  const webcamRef = useRef(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+
+    let w = (canvas.width = canvas.offsetWidth);
+    let h = (canvas.height = canvas.offsetHeight);
+
+    let shockwaveRadius = 0;
+    let particles = [];
+
+    const rand = (min, max) => Math.random() * (max - min) + min;
+
+    function spawnParticles() {
+      for (let i = 0; i < 5; i++) {
+        particles.push({
+          x: w / 2,
+          y: h / 2,
+          angle: rand(0, Math.PI * 2),
+          speed: rand(0.5, 1.4),
+          size: rand(1, 3),
+          alpha: 1,
+        });
+      }
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, w, h);
+
+      // Background Glow
+      const g = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 1.2);
+      g.addColorStop(0, "rgba(180, 0, 255, 0.25)");
+      g.addColorStop(1, "rgba(60, 0, 120, 0.05)");
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, h);
+
+      // ENERGY CORE
+      ctx.beginPath();
+      ctx.arc(w / 2, h / 2, 30, 0, Math.PI * 2);
+      ctx.fillStyle =
+        state === "speaking"
+          ? "rgba(220, 0, 255, 0.9)"
+          : "rgba(200, 0, 255, 0.55)";
+      ctx.shadowBlur = 35;
+      ctx.shadowColor = "#ff00ff";
+      ctx.fill();
+
+      // SHOCKWAVE RINGS
+      if (state === "speaking") {
+        shockwaveRadius += 2.3;
+        if (shockwaveRadius > 200) shockwaveRadius = 20;
+
+        ctx.beginPath();
+        ctx.arc(w / 2, h / 2, shockwaveRadius, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(200,0,255,${1 - shockwaveRadius / 200})`;
+        ctx.lineWidth = 3;
+        ctx.stroke();
+
+        spawnParticles();
+      }
+
+      // PARTICLES
+      particles.forEach((p, i) => {
+        p.x += Math.cos(p.angle) * p.speed;
+        p.y += Math.sin(p.angle) * p.speed;
+        p.alpha -= 0.015;
+
+        ctx.fillStyle = `rgba(255,0,255,${p.alpha})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+
+        if (p.alpha <= 0) particles.splice(i, 1);
+      });
+
+      requestAnimationFrame(draw);
+    }
+
+    draw();
+  }, [state]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{
+        width: "100%",
+        height: "100%",
+        borderRadius: "20px",
+      }}
+    />
+  );
+}
+
+// ============================================================================
+// 🔥 MAIN INTERVIEW COACH COMPONENT
+// ============================================================================
+export default function InterviewCoach() {
   const ws = useRef(null);
+  const webcamRef = useRef(null);
   const messagesEndRef = useRef(null);
 
-  // Audio Refs
-  const audioContextRef = useRef(null);
-  const audioQueueRef = useRef([]);
-  const isPlayingRef = useRef(false);
+  // AUDIO
+  const audioCtx = useRef(null);
+  const audioQueue = useRef([]);
+  const audioPlaying = useRef(false);
 
-  // SpeechSynthesis Fallback / Dual Voice Setup
-  const synthRef = useRef(window.speechSynthesis || null);
-  const [availableVoices, setAvailableVoices] = useState([]);
-
-  // Speech recognition
+  // SPEECH RECOGNITION
   const recognitionRef = useRef(null);
-  const silenceTimerRef = useRef(null);
+  const silenceTimer = useRef(null);
 
-  // State
-  const [interviewState, setInterviewState] = useState('idle');
-  const [timeLeft, setTimeLeft] = useState(30 * 60);
+  // STATE
   const [messages, setMessages] = useState([]);
+  const [connection, setConnection] = useState("connecting");
+  const [interviewState, setInterviewState] = useState("idle");
   const [isListening, setIsListening] = useState(false);
   const [aiSpeaking, setAiSpeaking] = useState(false);
-  const [postureStatus, setPostureStatus] = useState('Good');
-  const [connectionStatus, setConnectionStatus] = useState('disconnected');
-  const [reportData, setReportData] = useState(null);
-  const [isModelLoaded, setIsModelLoaded] = useState(false);
-  const [visualizerState, setVisualizerState] = useState('idle');
+  const [visualizer, setVisualizer] = useState("idle");
+  const [posture, setPosture] = useState("Good");
+  const [report, setReport] = useState(null);
+  const [blurLevel, setBlurLevel] = useState(0);
+  const [timeLeft, setTimeLeft] = useState(1800);
 
-  // New User Controls
-  const [dualVoiceMode, setDualVoiceMode] = useState(false);
-  const [speechRate, setSpeechRate] = useState(1);
-  const [enableTTSfallback, setEnableTTSfallback] = useState(true);
-  const [videoBlurLevel, setVideoBlurLevel] = useState(0); // 0 to 10
-
-  // --- Utility Hooks for Voices ---
+  // Update visualizer
   useEffect(() => {
-    if (!synthRef.current) return;
-    const updateVoices = () => {
-      const voices = synthRef.current.getVoices().filter(v => v.lang.startsWith('en'));
-      setAvailableVoices(voices);
-    };
-
-    if (synthRef.current.onvoiceschanged !== undefined) {
-      synthRef.current.onvoiceschanged = updateVoices;
-    }
-    updateVoices();
-
-    return () => {
-      if (synthRef.current) synthRef.current.onvoiceschanged = null;
-    };
-  }, []);
-
-  const getVoicePair = useCallback(() => {
-    if (!dualVoiceMode || availableVoices.length < 2) return [null, null];
-    const maleVoice = availableVoices.find(v => v.name.match(/Google.*male|Microsoft.*male|male/i)) || availableVoices.find(v => v.name.match(/male/i));
-    const femaleVoice = availableVoices.find(v => v.name.match(/Google.*female|Microsoft.*female|female/i)) || availableVoices.find(v => v.name.match(/female/i));
-    const voice1 = maleVoice || availableVoices[0];
-    const voice2 = femaleVoice || availableVoices.find(v => v.name !== voice1?.name) || availableVoices[1];
-    return [voice1, voice2];
-  }, [dualVoiceMode, availableVoices]);
-
-
-  // --- Visualizer sync ---
-  useEffect(() => {
-    if (aiSpeaking) setVisualizerState('speaking');
-    else if (isListening) setVisualizerState('listening');
-    else setVisualizerState('idle');
+    if (aiSpeaking) setVisualizer("speaking");
+    else if (isListening) setVisualizer("listening");
+    else setVisualizer("idle");
   }, [aiSpeaking, isListening]);
 
-  // --- Audio playback (arraybuffer) ---
-  const handleAudioChunk = async (arrayBuffer) => {
-    if (!audioContextRef.current) audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
-    const ctx = audioContextRef.current;
-    if (ctx.state === 'suspended') await ctx.resume();
-    try {
-      const audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0));
-      audioQueueRef.current.push(audioBuffer);
-      playNextChunk();
-    } catch (e) {
-      console.error('Audio decode failed, will fallback to TTS if available', e);
-    }
-  };
+  // WEBSOCKET CONNECT
+  const connectWS = useCallback(() => {
+    ws.current = new WebSocket("ws://localhost:8000/ws/interview");
+    ws.current.binaryType = "arraybuffer";
 
-  const playNextChunk = () => {
-    if (isPlayingRef.current || audioQueueRef.current.length === 0) return;
-    isPlayingRef.current = true;
-    const ctx = audioContextRef.current;
-    const audioBuffer = audioQueueRef.current.shift();
-    const source = ctx.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(ctx.destination);
-    source.start(0);
-    setAiSpeaking(true);
+    ws.current.onopen = () => setConnection("connected");
 
-    source.onended = () => {
-      isPlayingRef.current = false;
-      if (audioQueueRef.current.length > 0) playNextChunk();
-      else {
-        setAiSpeaking(false);
-        // CRITICAL FIX STEP 3: Start listening immediately after AI audio finishes
-        if (interviewState === 'active') startListening(); 
-      }
-    };
-  };
-
-  // --- TTS using SpeechSynthesis (fallback) ---
-  const speakText = (text) => {
-    if (!synthRef.current || !enableTTSfallback) return;
-
-    const rate = Math.min(2, Math.max(0.6, speechRate));
-    synthRef.current.cancel();
-    setAiSpeaking(true);
-
-    const onSpeechEnd = () => {
-      // Check if both single/dual utterances have finished before setting AI to false
-      if (synthRef.current.speaking === false) {
-        setAiSpeaking(false);
-        // CRITICAL FIX STEP 4: Start listening immediately after AI TTS finishes
-        if (interviewState === 'active') startListening(); 
-      }
-    };
-    
-    // 1. Dual Voice Mode
-    if (dualVoiceMode) {
-      const [voice1, voice2] = getVoicePair();
-
-      if (voice1 && voice2) {
-        const utter1 = new SpeechSynthesisUtterance(text);
-        utter1.rate = rate;
-        utter1.voice = voice1;
-        utter1.onend = onSpeechEnd;
-
-        const utter2 = new SpeechSynthesisUtterance(text);
-        utter2.rate = rate + 0.05; 
-        utter2.pitch = 1.05; 
-        utter2.voice = voice2;
-        utter2.onend = onSpeechEnd;
-
-        synthRef.current.speak(utter1);
-        synthRef.current.speak(utter2);
-
-      } else {
-        console.warn('Not enough voices for dual-voice mode, falling back to single voice.');
-        setDualVoiceMode(false); 
-        speakText(text); 
-      }
-
-    } else {
-      // 2. Single Voice Mode
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.rate = rate;
-      utter.onend = onSpeechEnd;
-      synthRef.current.speak(utter);
-    }
-  };
-
-
-  // --- WebSocket management ---
-  const connectWebSocket = useCallback(() => {
-    if (ws.current && (ws.current.readyState === WebSocket.OPEN || ws.current.readyState === WebSocket.CONNECTING)) return;
-    ws.current = new WebSocket('ws://localhost:8000/ws/interview');
-    ws.current.binaryType = 'arraybuffer';
-
-    ws.current.onopen = () => {
-      console.log('WS Connected');
-      setConnectionStatus('connected');
-    };
     ws.current.onclose = () => {
-      console.log('WS Closed — retry in 1s');
-      setConnectionStatus('disconnected');
-      setTimeout(connectWebSocket, 1000);
-    };
-    ws.current.onerror = (err) => {
-      console.warn('WS error', err);
-      ws.current.close();
+      setConnection("disconnected");
+      setTimeout(connectWS, 1200);
     };
 
-    ws.current.onmessage = async (event) => {
-      // arraybuffer audio from server
+    ws.current.onmessage = (event) => {
       if (event.data instanceof ArrayBuffer) {
-        handleAudioChunk(event.data);
+        handleAudio(event.data);
         return;
       }
 
       try {
         const data = JSON.parse(event.data);
-        if (data.type === 'text_response') {
-          setMessages((p) => [...p, { sender: 'ai', text: data.content }]);
 
-          // Prefer server audio; otherwise use SpeechSynthesis fallback
-          if (!audioQueueRef.current.length) {
-            if (enableTTSfallback && synthRef.current) {
-              speakText(data.content);
-            } else {
-              // Fallback if no audio/TTS: just show speaking state for a moment
-              setAiSpeaking(true);
-              setTimeout(() => {
-                setAiSpeaking(false);
-                // CRITICAL FIX STEP 5: Start listening if nothing else is playing
-                if (interviewState === 'active') startListening(); 
-              }, Math.min(5000, data.content.length * 80));
-            }
-          }
-        } else if (data.type === 'report') {
-          // Add 'Interview ended' message to the transcript before showing report
-          setMessages((p) => [...p, { sender: 'system', text: 'Interview ended.' }]);
-          
-          setTimeout(() => {
-            try { setReportData(JSON.parse(data.content)); } catch { setReportData(data.content); }
-            setInterviewState('finished');
-            
-            // CRITICAL FIX STEP 6: Stop listening immediately when report is received
-            if (recognitionRef.current) { recognitionRef.current.stop(); setIsListening(false); } 
-
-          }, 1000);
+        if (data.type === "text_response") {
+          setMessages((p) => [...p, { sender: "ai", text: data.content }]);
         }
-      } catch (e) {
-        console.error('WS parse error', e);
-      }
+
+        if (data.type === "report") {
+          setReport(JSON.parse(data.content));
+          setInterviewState("finished");
+          stopMic();
+        }
+      } catch {}
     };
-  }, [enableTTSfallback, dualVoiceMode, speechRate, getVoicePair, interviewState]); // Added interviewState dependency
-
-  useEffect(() => {
-    connectWebSocket();
-    return () => {
-      ws.current?.close();
-      if (recognitionRef.current) recognitionRef.current.stop(); // Clean up mic on unmount
-    };
-  }, [connectWebSocket]);
-
-  // --- Timer & Mediapipe & Posture (unchanged) ---
-
-  useEffect(() => {
-    let timer = null;
-    if (interviewState === 'active' && timeLeft > 0) {
-      timer = setInterval(() => setTimeLeft((prev) => (prev <= 1 ? (endInterview(), 0) : prev - 1)), 1000);
-    }
-    return () => clearInterval(timer);
-  }, [interviewState, timeLeft]);
-
-  const formatTime = (seconds) => {
-    const m = Math.floor(seconds / 60).toString().padStart(2, '0');
-    const s = (seconds % 60).toString().padStart(2, '0');
-    return `${m}:${s}`;
-  };
-
-  useEffect(() => {
-    const loadScript = (src) => new Promise((res) => {
-      if (document.querySelector(`script[src="${src}"]`)) return res();
-      const s = document.createElement('script'); s.src = src; s.crossOrigin = 'anonymous'; s.onload = res; document.body.appendChild(s);
-    });
-
-    const load = async () => {
-      try {
-        await loadScript('https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js');
-        await loadScript('https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js');
-        setIsModelLoaded(true);
-      } catch (e) { console.warn(e); }
-    };
-    load();
   }, []);
 
+  useEffect(connectWS, []);
+
+  // Auto scroll
   useEffect(() => {
-    if (!isModelLoaded || !window.Pose || !window.Camera) return;
-    const pose = new window.Pose({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}` });
-    pose.setOptions({ modelComplexity: 1, smoothLandmarks: true });
-    pose.onResults((res) => {
-      if (!res.poseLandmarks) return;
-      const noseY = res.poseLandmarks[0].y;
-      const shoulderY = (res.poseLandmarks[11].y + res.poseLandmarks[12].y) / 2;
-      const isSlouch = Math.abs(noseY - shoulderY) < 0.15;
-      setPostureStatus(isSlouch ? 'Bad (Slouching)' : 'Good');
-    });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
-    let camera = null;
-    const startCam = () => {
-      if (webcamRef.current?.video) {
-        camera = new window.Camera(webcamRef.current.video, {
-          onFrame: async () => { if (webcamRef.current?.video) await pose.send({ image: webcamRef.current.video }); },
-          width: 640, height: 480
-        });
-        camera.start();
-      } else setTimeout(startCam, 400);
+  // AUDIO ENGINE
+  const handleAudio = async (buf) => {
+    if (!audioCtx.current)
+      audioCtx.current = new (window.AudioContext || window.webkitAudioContext)();
+
+    const ctx = audioCtx.current;
+    if (ctx.state === "suspended") await ctx.resume();
+
+    try {
+      const decoded = await ctx.decodeAudioData(buf.slice(0));
+      audioQueue.current.push(decoded);
+      playAudio();
+    } catch {}
+  };
+
+  const playAudio = () => {
+    if (audioPlaying.current || audioQueue.current.length === 0) return;
+
+    const ctx = audioCtx.current;
+    const next = audioQueue.current.shift();
+    const src = ctx.createBufferSource();
+
+    src.buffer = next;
+    src.connect(ctx.destination);
+    src.start();
+
+    audioPlaying.current = true;
+    setAiSpeaking(true);
+
+    src.onended = () => {
+      audioPlaying.current = false;
+
+      if (audioQueue.current.length > 0) playAudio();
+      else {
+        setAiSpeaking(false);
+        if (interviewState === "active") startMic();
+      }
     };
-    startCam();
-    return () => { try { pose.close(); camera?.stop(); } catch {} };
-  }, [isModelLoaded]);
+  };
 
-  // --- Speech Recognition (robust) ---
-  const startListening = () => {
-    // If AI is currently speaking, don't start listening yet.
+  // MIC ENGINE
+  const stopMic = () => {
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.onend = null;
+        recognitionRef.current.stop();
+      } catch {}
+    }
+    setIsListening(false);
+  };
+
+  const startMic = () => {
     if (aiSpeaking) return;
 
-    // CRITICAL FIX STEP 7: Ensure mic is stopped before restarting it
-    if (recognitionRef.current) {
-      try { 
-        recognitionRef.current.onend = null; 
-        recognitionRef.current.stop(); 
-      } catch {};
-      recognitionRef.current = null;
-    }
+    stopMic();
 
-    // Stop any TTS audio
-    if (synthRef.current) synthRef.current.cancel();
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return alert("Your browser does not support speech recognition.");
 
-    // Reset audio queue
-    if (audioContextRef.current) {
-      try { audioContextRef.current.suspend(); } catch {}
-      audioQueueRef.current = [];
-      isPlayingRef.current = false;
-      setAiSpeaking(false);
-    }
+    const rec = new SR();
+    recognitionRef.current = rec;
+    rec.lang = "en-US";
+    rec.interimResults = true;
+    rec.continuous = true;
 
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) { alert('Speech recognition not supported in this browser. Use Chrome.'); return; }
-
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'en-US';
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.maxAlternatives = 1; // Optimization
-    recognitionRef.current = recognition;
+    let finalText = "";
     setIsListening(true);
 
-    let finalTranscript = '';
-    recognition.onresult = (ev) => {
-      clearTimeout(silenceTimerRef.current);
-      let interim = '';
-      for (let i = ev.resultIndex; i < ev.results.length; i++) {
-        if (ev.results[i].isFinal) finalTranscript += ev.results[i][0].transcript + ' ';
-        else interim += ev.results[i][0].transcript;
-      }
-      
-      // CRITICAL FIX STEP 8: Show interim text if possible (optional, but good UX)
-      // Note: We only update the state when final text is ready, but this timeout handles sending the final text.
+    rec.onresult = (e) => {
+      clearTimeout(silenceTimer.current);
 
-      // auto-send after silence
-      silenceTimerRef.current = setTimeout(() => {
-        if (finalTranscript.trim()) { 
-          // Stop recognition and send the message
-          recognitionRef.current.stop(); 
-          sendUserMessage(finalTranscript.trim()); 
-          finalTranscript = ''; 
-        } else {
-          // If silence and no final text, restart listening to catch the next sound
-          if (interviewState === 'active' && !aiSpeaking) {
-            recognitionRef.current.start();
-          } else setIsListening(false);
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) finalText += e.results[i][0].transcript + " ";
+      }
+
+      silenceTimer.current = setTimeout(() => {
+        if (finalText.trim()) {
+          sendAns(finalText.trim());
+          finalText = "";
         }
-      }, 1800); // 1.8 seconds of silence
-
+      }, 900);
     };
 
-    recognition.onend = () => {
-      // Only restart if the interview is active and AI is not about to speak
-      if (interviewState === 'active' && !aiSpeaking) {
-        // Only restart if silence timer hasn't already sent a message/restarted
-        if (!silenceTimerRef.current) { 
-           try { recognition.start(); } catch {}; 
-        }
-      } else {
-        setIsListening(false);
-      }
-    };
-    
-    recognition.onerror = (err) => {
-      console.warn('Recognition error', err);
-      if (err.error === 'not-allowed') { 
-        setIsListening(false); 
-        alert('Microphone permission denied. Please allow microphone access and try again.'); 
-      }
-      // If error is 'no-speech' or 'audio-capture', try restarting
-      if (interviewState === 'active' && !aiSpeaking && (err.error === 'no-speech' || err.error === 'audio-capture')) {
-        try { recognition.start(); } catch {};
-      }
+    rec.onend = () => {
+      if (!aiSpeaking) rec.start();
     };
 
-    try { recognition.start(); } catch (e) { console.warn("Recognition start failed:", e); }
+    try {
+      rec.start();
+    } catch {}
   };
 
-  const sendUserMessage = (text) => {
-    // Note: recognition is stopped in recognition.onresult/onend handler
-    setIsListening(false); 
-    setMessages((p) => [...p, { sender: 'user', text }]);
+  const sendAns = (text) => {
+    stopMic();
+    setMessages((p) => [...p, { sender: "user", text }]);
 
-    if (ws.current?.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({ action: 'answer', text, visual_context: { posture: postureStatus } }));
-    } else {
-      connectWebSocket();
-    }
+    ws.current.send(
+      JSON.stringify({
+        action: "answer",
+        text,
+        visual_context: { posture },
+      })
+    );
   };
 
-  // --- Actions ---
+  // INTERVIEW CONTROL
   const startInterview = () => {
-    if (!audioContextRef.current) audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
-    if (audioContextRef.current.state === 'suspended') audioContextRef.current.resume();
-    
-    // CRITICAL FIX STEP 1: Set state first, then trigger WS message
-    setInterviewState('active'); 
-    setMessages([]); 
-    setReportData(null); 
-    setTimeLeft(30 * 60);
-    
-    // CRITICAL FIX STEP 2: The backend handles the initial AI speech (which triggers startListening on completion)
-    if (ws.current?.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({ action: 'start' }));
-    } else {
-      connectWebSocket();
-    }
-    
-    // Do NOT call startListening() here. It will start too early and conflict with AI's initial speech.
+    setInterviewState("active");
+    setMessages([]);
+    setReport(null);
+    setTimeLeft(1800);
+
+    if (!audioCtx.current)
+      audioCtx.current = new (window.AudioContext || window.webkitAudioContext)();
+    audioCtx.current.resume();
+
+    ws.current.send(JSON.stringify({ action: "start", role: "general" }));
   };
 
   const endInterview = () => {
-    // Stop all media/audio immediately
-    if (audioContextRef.current) {
-      try { audioContextRef.current.suspend(); } catch {}
-      audioQueueRef.current = []; isPlayingRef.current = false; setAiSpeaking(false);
-    }
-    if (recognitionRef.current) { recognitionRef.current.stop(); setIsListening(false); }
-
-    // Send end signal to backend (which generates report and sends final message)
-    if (ws.current?.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({ action: 'end' }));
-    } else {
-       // If WS is closed, just force finish state and a local message
-       setMessages((p) => [...p, { sender: 'system', text: 'Interview ended due to disconnection.' }]);
-       setInterviewState('finished');
-    }
+    stopMic();
+    ws.current.send(JSON.stringify({ action: "end" }));
+    setInterviewState("finished");
   };
 
-  // keyboard shortcuts: press 'L' to toggle listening
+  // TIMER
   useEffect(() => {
-    const onKey = (e) => {
-      if (e.key.toLowerCase() === 'l' && interviewState === 'active' && !aiSpeaking) {
-        if (isListening) { recognitionRef.current?.stop(); setIsListening(false); }
-        else startListening();
-      }
-      if (e.key === 'Escape') { if (interviewState === 'active') endInterview(); }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [isListening, interviewState, aiSpeaking]);
+    if (interviewState !== "active") return;
+    if (timeLeft <= 0) return endInterview();
 
-  // scroll transcript to bottom
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+    const id = setInterval(() => setTimeLeft((t) => t - 1), 1000);
+    return () => clearInterval(id);
+  }, [timeLeft, interviewState]);
 
-  // --- Render (Unchanged) ---
+  // ========================================================================
+  // INLINE CSS — Purple Neon Sci-Fi Theme
+  // ========================================================================
+  const css = `
+    * {
+      margin: 0; padding: 0; box-sizing: border-box;
+      font-family: 'Inter', sans-serif;
+    }
+    body {
+      background: #0a0014;
+    }
+
+    .root {
+      width: 100%;
+      height: 100vh;
+      overflow: hidden;
+      padding: 18px;
+      background: radial-gradient(circle at 20% 20%, #300040, #090010);
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .layout {
+      flex: 1;
+      display: flex;
+      gap: 20px;
+    }
+
+    .glass {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,0,255,0.25);
+      backdrop-filter: blur(15px);
+      border-radius: 18px;
+      box-shadow: 0 0 25px rgba(255,0,255,0.15);
+    }
+
+    /* LEFT PANEL */
+    .left {
+      width: 35%;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .cam-box {
+      height: 45vh;
+      border-radius: 18px;
+      overflow: hidden;
+      position: relative;
+      border: 1px solid rgba(255,0,255,0.35);
+      box-shadow: 0 0 25px rgba(255,0,255,0.25);
+    }
+
+    .webcam {
+      width: 100%; height: 100%; object-fit: cover;
+    }
+
+    .tag {
+      position: absolute;
+      bottom: 12px; left: 12px;
+      padding: 6px 12px;
+      background: rgba(255,0,255,0.4);
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    .connection {
+      position: absolute;
+      top: 12px; right: 12px;
+      padding: 6px 12px;
+      background: rgba(255,255,255,0.15);
+      border-radius: 10px;
+      font-size: 12px;
+    }
+
+    /* TRANSCRIPT */
+    .transcript {
+      flex: 1;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .trans-head {
+      font-size: 15px;
+      margin-bottom: 10px;
+      color: #ff99ff;
+      font-weight: bold;
+    }
+
+    .trans-body {
+      flex: 1;
+      overflow-y: auto;
+      padding-right: 6px;
+    }
+
+    .bubble {
+      margin-bottom: 12px;
+    }
+
+    .sender {
+      font-size: 11px;
+      color: #ffb0ff;
+      opacity: 0.8;
+    }
+
+    .txt {
+      padding: 10px 15px;
+      margin-top: 4px;
+      background: rgba(255,0,255,0.15);
+      border-radius: 12px;
+    }
+
+    .user .txt {
+      background: rgba(0,200,255,0.15);
+    }
+
+    .pulse {
+      animation: pulse 1.2s infinite;
+    }
+    @keyframes pulse {
+      0% { opacity: .3; } 50% { opacity: 1; } 100% { opacity: .3; }
+    }
+
+    .timer {
+      margin-top: 10px;
+      font-size: 14px;
+      color: #ff99ff;
+      text-align: right;
+    }
+
+    /* RIGHT PANEL */
+    .right {
+      width: 65%;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .title {
+      font-size: 26px;
+      color: #ff66ff;
+      text-shadow: 0 0 12px #ff00ff;
+      font-weight: bold;
+    }
+
+    .status {
+      margin-top: 5px;
+      font-size: 12px;
+      padding: 6px 12px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      width: fit-content;
+    }
+
+    .sphere {
+      height: 33vh;
+      margin-top: 15px;
+      border-radius: 20px;
+      overflow: hidden;
+      border: 1px solid rgba(255,0,255,0.3);
+      box-shadow: 0 0 30px rgba(255,0,255,0.25);
+    }
+
+    /* BUTTONS */
+    .controls {
+      margin-top: auto;
+      display: flex;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .btn {
+      padding: 12px 22px;
+      border-radius: 12px;
+      border: none;
+      cursor: pointer;
+      font-weight: bold;
+      font-size: 14px;
+      transition: 0.2s;
+    }
+
+    .start {
+      background: #ff00ff;
+      color: #000;
+      box-shadow: 0 0 12px #ff00ff;
+    }
+
+    .mic {
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,0,255,0.4);
+      color: #fff;
+    }
+
+    .mic.on {
+      background: rgba(0,200,255,0.25);
+      box-shadow: 0 0 12px #00ccff;
+    }
+
+    .end {
+      background: rgba(255,40,40,0.4);
+      color: #fff;
+      border: 1px solid rgba(255,0,70,0.6);
+    }
+
+    /* REPORT MODAL */
+    .modal {
+      position: fixed;
+      inset: 0;
+      backdrop-filter: blur(12px);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .modal-card {
+      width: 430px;
+      padding: 22px;
+      background: rgba(0,0,0,0.7);
+      border-radius: 20px;
+      border: 1px solid rgba(255,0,255,0.4);
+      box-shadow: 0 0 35px #ff00ff;
+    }
+
+    .report-score {
+      font-size: 40px;
+      margin-bottom: 10px;
+      color: #ff66ff;
+      text-align: center;
+      font-weight: bold;
+    }
+  `;
+
+  // ========================================================================
+  // JSX UI
+  // ========================================================================
   return (
-    <div className="coach-root">
+    <>
+      <style>{css}</style>
 
-      {/* Animated background layer */}
-      <div className="bg-animated">
-        <div className="bg-gradient" />
-        <canvas id="bg-noise" className="bg-noise" />
-      </div>
+      <div className="root">
+        <div className="layout">
 
-      <div className="coach-container">
-        <aside className="left-panel glass">
-          <div className="cam-wrapper">
-            <Webcam
-              ref={webcamRef}
-              audio={false}
-              className="webcam-el"
-              style={{ filter: `blur(${videoBlurLevel}px)` }} // Apply Blur Filter
-            />
-            <div className={`posture ${postureStatus.includes('Bad') ? 'bad' : 'good'}`}>{postureStatus}</div>
-            <div className="connection-pill">{connectionStatus}</div>
-          </div>
-
-          <div className="transcript glass small">
-            <div className="transcript-header">Live Transcript</div>
-            <div className="transcript-body">
-              {messages.slice(-6).map((m, i) => (
-                <div key={i} className={`msg ${m.sender}`}>
-                  <div className="msg-sender">{m.sender === 'user' ? 'YOU' : m.sender === 'ai' ? 'AI' : 'SYSTEM'}</div>
-                  <div className="msg-text">{m.text}</div>
-                </div>
-              ))}
-              {interviewState === 'active' && isListening && (
-                <div className="msg listening-indicator">
-                  <div className="msg-sender">YOU</div>
-                  <div className="msg-text text-pulse">...listening</div>
-                </div>
-              )}
-              
-              <div ref={messagesEndRef} />
+          {/* LEFT PANEL */}
+          <div className="left">
+            <div className="cam-box glass">
+              <Webcam
+                ref={webcamRef}
+                className="webcam"
+                style={{ filter: `blur(${blurLevel}px)` }}
+              />
+              <div className="tag">{posture}</div>
+              <div className="connection">{connection}</div>
             </div>
 
-            <div className="transcript-controls">
-              <div className="timer">{formatTime(timeLeft)}</div>
-              <div className="quick-tips">Pro Tip: Press <strong>L</strong> to toggle mic</div>
+            <div className="transcript glass">
+              <div className="trans-head">Live Transcript</div>
+
+              <div className="trans-body">
+                {messages.slice(-6).map((m, i) => (
+                  <div key={i} className={`bubble ${m.sender}`}>
+                    <div className="sender">{m.sender.toUpperCase()}</div>
+                    <div className="txt">{m.text}</div>
+                  </div>
+                ))}
+
+                {isListening && (
+                  <div className="bubble user">
+                    <div className="sender">YOU</div>
+                    <div className="txt pulse">…listening</div>
+                  </div>
+                )}
+
+                <div ref={messagesEndRef}></div>
+              </div>
+
+              <div className="timer">
+                {String(Math.floor(timeLeft / 60)).padStart(2, "0")}:
+                {String(timeLeft % 60).padStart(2, "0")}
+              </div>
             </div>
           </div>
-        </aside>
 
-        <main className="right-panel glass">
-          <header className="voice-header">
+          {/* RIGHT PANEL */}
+          <div className="right glass">
             <div>
-              <h3>AI Voice Mode</h3>
-              <div className="status">{visualizerState === 'speaking' ? 'Speaking' : visualizerState === 'listening' ? 'Listening' : 'Idle'}</div>
+              <div className="title">AI Voice Mode</div>
+              <div className="status">
+                {visualizer === "speaking"
+                  ? "Speaking"
+                  : visualizer === "listening"
+                  ? "Listening"
+                  : "Idle"}
+              </div>
             </div>
 
-            <div className="voice-settings">
-              <label className="setting-row">
-                <input type="checkbox" checked={dualVoiceMode} onChange={(e) => setDualVoiceMode(e.target.checked)} />
-                <span>Dual Voice Mode</span>
-              </label>
-              <label className="setting-row">
-                <input type="checkbox" checked={enableTTSfallback} onChange={(e) => setEnableTTSfallback(e.target.checked)} />
-                <span>Enable TTS fallback</span>
-              </label>
+            {/* ENERGY SPHERE */}
+            <div className="sphere">
+              <EnergySphere state={visualizer} />
             </div>
-          </header>
-          
-          <div className="settings-container glass-settings">
-            <label className="setting-row">
-                <span>Speech Rate ({speechRate.toFixed(1)}x)</span>
-                <input type="range" min="0.6" max="1.6" step="0.1" value={speechRate} onChange={(e) => setSpeechRate(Number(e.target.value))} />
-            </label>
-            <label className="setting-row">
-                <span>Video Blur Level ({videoBlurLevel}px)</span>
-                <input type="range" min="0" max="10" step="1" value={videoBlurLevel} onChange={(e) => setVideoBlurLevel(Number(e.target.value))} />
-            </label>
-          </div>
 
-          <div className="visualizer-area">
-            <ParticleSphere state={visualizerState} />
-          </div>
-
-          <footer className="controls-bar">
-            {interviewState === 'idle' || interviewState === 'finished' ? (
-              <button className="btn primary" onClick={startInterview}>Start Interview</button>
-            ) : (
-              <>
-                <button className={`btn mic ${isListening ? 'on' : ''}`} onClick={() => (isListening ? recognitionRef.current?.stop() : startListening())} disabled={aiSpeaking}>
-                  {isListening ? 'Stop Mic' : 'Start Mic'}
+            {/* CONTROLS */}
+            <div className="controls">
+              {(interviewState === "idle" || interviewState === "finished") ? (
+                <button className="btn start" onClick={startInterview}>
+                  Start Interview
                 </button>
-                <button className="btn danger" onClick={endInterview}>End Interview</button>
-              </>
-            )}
+              ) : (
+                <>
+                  <button
+                    className={`btn mic ${isListening ? "on" : ""}`}
+                    onClick={() => (isListening ? stopMic() : startMic())}
+                    disabled={aiSpeaking}
+                  >
+                    {isListening ? "Stop Mic" : "Start Mic"}
+                  </button>
 
-            <div className="micro-hints">
-              <div>Voice Mode: {dualVoiceMode ? 'Dual (M/F)' : 'Single'}</div>
-              <div>AI Speaking: {aiSpeaking ? 'Yes' : 'No'}</div>
+                  <button className="btn end" onClick={endInterview}>
+                    End
+                  </button>
+                </>
+              )}
             </div>
-          </footer>
-
-        </main>
-      </div>
-
-      {/* REPORT modal */}
-      {reportData && (
-        <div className="report-modal">
-          <div className="report-card">
-            <h2>Interview Report</h2>
-            <div className="report-grid">
-              <div className="score">{reportData.score}</div>
-              <div className="confidence">{reportData.confidence_level}</div>
-            </div>
-            <div className="feedback">{reportData.feedback}</div>
-            {reportData.improvements && reportData.improvements.length > 0 && (
-                <div className="improvements-list">
-                    <h4>Actionable Tips:</h4>
-                    <ul>
-                        {reportData.improvements.map((tip, index) => <li key={index}>{tip}</li>)}
-                    </ul>
-                </div>
-            )}
-            <button className="btn primary" onClick={() => setReportData(null)}>Close Report</button>
           </div>
+
         </div>
-      )}
 
-      {/* ENHANCED INLINE STYLES FOR THEME AND GLASS EFFECT (Unchanged) */}
-      <style>{`
-        /* Enhanced Base Styles */
-        :root {
-          --color-bg-dark: #0a0a0c;
-          --color-glass-bg: rgba(18, 18, 22, 0.75);
-          --color-border: rgba(255, 255, 255, 0.08);
-          --color-primary: #1dd1a1;
-          --color-primary-dark: #0f8f6f;
-        }
+        {/* REPORT MODAL */}
+        {report && (
+          <div className="modal">
+            <div className="modal-card">
+              <div className="report-score">{report.score}</div>
+              <p style={{ marginBottom: "14px" }}>{report.feedback}</p>
 
-        .coach-root { 
-          position: relative; 
-          min-height: 100vh; 
-          overflow: hidden; 
-          font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; 
-          background-color: var(--color-bg-dark); /* Ensure a dark base */
-          color: #e9eefc;
-        }
-        
-        /* Animated Background */
-        .bg-animated { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
-        .bg-gradient { 
-            position: absolute; 
-            inset: -50px; /* Expand for movement */
-            background: linear-gradient(135deg, #0f0a20, #041a12); 
-            animation: gradient-shift 40s ease-in-out infinite alternate;
-            background-size: 400% 400%;
-            filter: blur(50px) saturate(120%); 
-            opacity: 0.8;
-        }
-        @keyframes gradient-shift {
-            0% { background-position: 0% 50%; }
-            50% { background-position: 100% 50%; }
-            100% { background-position: 0% 50%; }
-        }
-        .bg-noise { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0.06; }
-        
-        /* Layout */
-        .coach-container { position: relative; z-index: 5; display:flex; gap:20px; padding:24px; height:100vh; box-sizing:border-box; }
-        .glass { 
-            background: var(--color-glass-bg); 
-            backdrop-filter: blur(16px) saturate(130%); 
-            border-radius:20px; 
-            border: 1px solid var(--color-border); 
-            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
-            transition: all 0.3s ease;
-        }
-        .left-panel { width: 40%; display:flex; flex-direction:column; gap:16px; }
-        .right-panel { flex:1; display:flex; flex-direction:column; padding:24px; }
-
-        /* Webcam & Posture */
-        .cam-wrapper { position:relative; height: 55vh; overflow:hidden; border-radius:18px; }
-        .webcam-el { width:100%; height:100%; object-fit:cover; transition: filter 0.3s ease; } /* Transition for blur */
-        .posture { position:absolute; top:18px; left:18px; padding:6px 14px; border-radius:999px; font-weight:700; font-size:13px; z-index:10; }
-        .posture.good { background:var(--color-primary); color:#041a12; }
-        .posture.bad { background:#ff6b6b; color:#330a0a; }
-        .connection-pill { position:absolute; top:18px; right:18px; font-size:13px; padding:6px 14px; border-radius:999px; color:#ddd; background:rgba(0,0,0,0.5); z-index:10; }
-
-        /* Transcript */
-        .transcript.small { padding:18px; display:flex; flex-direction:column; height:30vh; }
-        .transcript-header { color:#9aa; font-size:12px; text-transform:uppercase; margin-bottom:12px; font-weight:600; }
-        .transcript-body { flex:1; overflow-y:auto; overflow-x:hidden; display:flex; flex-direction:column; gap:10px; }
-        .msg { display:flex; gap:14px; align-items:flex-start; }
-        .msg .msg-sender { min-width:56px; font-weight:700; color:#9aa; font-size:12px; text-transform:uppercase; }
-        .msg.user .msg-sender { color:var(--color-primary); }
-        .msg.ai .msg-sender { color:#82aaff; }
-        .msg.system .msg-sender { color:#ff6b6b; } /* Color for system messages like 'ended' */
-        .msg .msg-text { color:#e6e6e6; line-height:1.6; }
-        .listening-indicator { opacity: 0.6; }
-        .text-pulse { animation: pulse 1.5s infinite alternate; }
-        @keyframes pulse { 0% { opacity: 0.5; } 100% { opacity: 1; } }
-
-        .transcript-controls { display:flex; justify-content:space-between; align-items:center; margin-top:12px; padding-top:12px; border-top:1px solid var(--color-border); }
-        .timer { font-size:14px; font-weight:600; color:#fff; }
-        .quick-tips { font-size:12px; color:#9aa; }
-
-        /* Right Panel */
-        .voice-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
-        .voice-header h3 { margin:0; font-weight:700; color:#e9eefc; font-size:20px; }
-        .voice-header .status { font-size:14px; color:var(--color-primary); font-weight:600; }
-        
-        .voice-settings { display:flex; gap:20px; align-items:center; }
-        .setting-row { display:flex; align-items:center; gap:8px; font-size:14px; cursor:pointer; }
-        .setting-row input[type="checkbox"] { transform: scale(1.1); cursor:pointer; }
-        
-        .settings-container {
-            padding: 16px;
-            margin-bottom: 20px;
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-        }
-        .settings-container .setting-row {
-            display: flex;
-            flex-direction: column;
-            align-items: flex-start;
-        }
-        .settings-container .setting-row span {
-            margin-bottom: 4px;
-            font-size: 14px;
-            color: #ccc;
-        }
-        .settings-container .setting-row input[type="range"] {
-            width: 100%;
-            -webkit-appearance: none;
-            height: 4px;
-            background: rgba(255,255,255,0.2);
-            border-radius: 2px;
-            outline: none;
-            transition: opacity .15s ease-in-out;
-        }
-        .settings-container .setting-row input[type="range"]::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            appearance: none;
-            width: 14px;
-            height: 14px;
-            border-radius: 50%;
-            background: var(--color-primary);
-            cursor: pointer;
-        }
-
-        .visualizer-area { flex:1; display:flex; align-items:center; justify-content:center; }
-        
-        /* Controls Bar */
-        .controls-bar { display:flex; gap:16px; align-items:center; justify-content:space-between; padding-top:20px; border-top:1px solid var(--color-border); }
-        .btn { 
-            padding:12px 24px; 
-            border-radius:14px; 
-            border:none; 
-            cursor:pointer; 
-            font-weight:700; 
-            font-size:15px;
-            transition: all 0.2s ease;
-        }
-        .btn:hover { transform: translateY(-2px); box-shadow: 0 8px 15px rgba(0,0,0,0.2); }
-        .btn.primary { background:var(--color-primary); color:#041a12; box-shadow:0 10px 30px rgba(29,209,161,0.18); }
-        .btn.danger { background:#ff4757; color:white; }
-        .btn.mic { background:#444; color:#fff; }
-        .btn.mic.on { box-shadow:0 0 0 4px rgba(255,255,255,0.1), 0 0 15px rgba(255,255,255,0.2); background:#fff; color:#000; }
-        .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
-
-        .micro-hints { display:flex; gap:15px; font-size:12px; color:#aaa; }
-
-        /* Report Modal */
-        .report-modal { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; z-index:1000; background:rgba(3,3,6,0.7); backdrop-filter: blur(5px); }
-        .report-card { 
-            width:880px; max-width:95%; padding:32px; 
-            border-radius:20px; 
-            background:linear-gradient(180deg,#0e0e11,#111116); 
-            border: 1px solid var(--color-border);
-            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
-        }
-        .report-card h4 { margin-top: 20px; margin-bottom: 10px; color: #fff; }
-        .report-card ul { padding-left: 20px; margin: 0; }
-        .report-grid { display:flex; gap:20px; margin:20px 0; }
-        .report-grid > div { padding:15px; border-radius:10px; background:rgba(255,255,255,0.05); flex:1; text-align:center; }
-      `}</style>
-
-    </div>
+              <button className="btn start" onClick={() => setReport(null)}>
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
   );
-};
-
-export default InterviewCoach;
+}
